@@ -1,10 +1,185 @@
 ﻿@page "/"
 
-<PageTitle>Index</PageTitle>
+@page "/weather"
+@using System.Net.Http
+@inject HttpClient httpClient
 
-<h1>Hello, world!</h1>
+<PageTitle>Today Forecast</PageTitle>
 
-Welcome to your new app.
+<!-- User input section -->
+<div class="form-group">
+    <label for="locationInput">Location:</label>
+    <input id="locationInput" class="form-control" @bind="@location" />
+    <button class="btn btn-primary mt-2" @onclick="GetWeather">Get Weather</button>
+</div>
 
-<SurveyPrompt Title="How is Blazor working for you?" />
+<!-- Display current weather information section -->
+@if (currentWeather != null)
+{
+    <h4>Current Weather - @currentWeather.Time</h4>
+    <p>Temperature: @currentWeather.Temperature &deg;C</p>
+    <p>Weather Code: @currentWeather.WeatherCode</p>
+    <p>Wind Speed: @currentWeather.WindSpeed m/s</p>
+    <p>Wind Direction: @currentWeather.WindDirection &deg;</p>
+}
 
+<!-- Display hourly weather information section -->
+@if (hourlyWeather != null)
+{
+    <h4>Hourly Weather</h4>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Temperature</th>
+                <th>Wind Speed</th>
+                <th>Relative Humidity</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var data in hourlyWeather)
+                {
+                <tr>
+                    <td>@data.Time</td>
+                    <td>@data.Temperature &deg;C</td>
+                    <td>@data.WindSpeed m/s</td>
+                    <td>@data.RelativeHumidity %</td>
+                </tr>
+                }
+        </tbody>
+    </table>
+}
+
+@code {
+private string location; // Holds the user's input location
+        private CurrentWeather currentWeather; // Holds the current weather information
+        private List<HourlyWeather> hourlyWeather; // Holds the hourly weather information
+
+        // Action to get weather information
+        private async Task GetWeather()
+        {
+            // Send an HTTP GET request to the geocoding API to search for the city coordinates
+            var geocodingResponse = await httpClient.GetAsync($"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=10&language=en&format=json");
+
+            // Check if the geocoding API call was successful
+            if (geocodingResponse.IsSuccessStatusCode)
+            {
+                // Deserialize the geocoding response content to retrieve the city coordinates
+                var geocodingResult = await geocodingResponse.Content.ReadFromJsonAsync<GeocodingApiResponse>();
+
+                // Check if the geocoding result is not null and has at least one result
+                if (geocodingResult != null && geocodingResult.Results.Count > 0)
+                {
+                    var cityCoordinates = geocodingResult.Results[0].Coordinates;
+
+                    // Send an HTTP GET request to the weather API to fetch weather data for the specified coordinates
+                    var weatherResponse = await httpClient.GetAsync($"https://api.open-meteo.com/v1/forecast?latitude={cityCoordinates.Lat}&longitude={cityCoordinates.Lon}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,windspeed_10m");
+                
+                    // Check if the weather API call was successful
+                    if (weatherResponse.IsSuccessStatusCode)
+                    {
+                        // Deserialize the weather response content to retrieve the weather data
+                        var weatherResult = await weatherResponse.Content.ReadFromJsonAsync<WeatherApiResponse>();
+
+                        // Extract current weather information fromthe weather API response and create a CurrentWeather object
+                        if (weatherResult?.CurrentWeather != null)
+                        {
+                            currentWeather = new CurrentWeather
+                            {
+                                Time = weatherResult.CurrentWeather.Time,
+                                Temperature = weatherResult.CurrentWeather.Temperature,
+                                WeatherCode = weatherResult.CurrentWeather.WeatherCode,
+                                WindSpeed = weatherResult.CurrentWeather.WindSpeed,
+                                WindDirection = weatherResult.CurrentWeather.WindDirection
+                            };
+                        } // Extract hourly weather information from the weather API response and create a list of HourlyWeather objects
+                        if (weatherResult?.Hourly != null)
+                        {
+                            hourlyWeather = new List<HourlyWeather>();
+                            for (int i = 0; i < weatherResult.Hourly.Time.Length; i++)
+                            {
+                                hourlyWeather.Add(new HourlyWeather
+                                {
+                                    Time = weatherResult.Hourly.Time[i],
+                                    Temperature = weatherResult.Hourly.Temperature_2m[i],
+                                    WindSpeed = weatherResult.Hourly.WindSpeed_10m[i],
+                                    RelativeHumidity = weatherResult.Hourly.RelativeHumidity_2m[i]
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Handle error if the weather API call was unsuccessful (e.g., display an error message)
+                    }
+                }
+                else
+                {
+                    // Handle error if the geocoding result is empty (e.g., display an error message)
+                }
+            }
+            else
+            {
+                // Handle error if the geocoding API call was unsuccessful (e.g., display an error message)
+            }
+        }
+
+        // Classes to represent the geocoding API response structure
+        private class GeocodingApiResponse
+        {
+            public List<GeocodingResult> Results { get; set; }
+        }
+
+        private class GeocodingResult
+        {
+            public Coordinates Coordinates { get; set; }
+        }
+
+        private class Coordinates
+        {
+            public double Lat { get; set; }
+            public double Lon { get; set; }
+        }
+
+        // Classes to represent the weather API response structure
+        private class WeatherApiResponse
+        {
+            public CurrentWeatherResponse CurrentWeather { get; set; }
+            public HourlyWeatherResponse Hourly { get; set; }
+        }
+
+        private class CurrentWeatherResponse
+        {
+            public DateTime Time { get; set; }
+            public double Temperature { get; set; }
+            public int WeatherCode { get; set; }
+            public double WindSpeed { get; set; }
+            public double WindDirection { get; set; }
+        }
+
+        private class HourlyWeatherResponse
+        {
+            public DateTime[] Time { get; set; }
+            public double[] Temperature_2m { get; set; }
+            public double[] WindSpeed_10m { get; set; }
+            public int[] RelativeHumidity_2m { get; set; }
+        }
+
+        // Classes to hold the weather information for display
+        private class CurrentWeather
+        {
+            public DateTime Time { get; set; }
+            public double Temperature { get; set; }
+            public int WeatherCode { get; set; }
+            public double WindSpeed { get; set; }
+            public double WindDirection { get; set; }
+        }
+
+        private class HourlyWeather
+        {
+            public DateTime Time { get; set; }
+            public double Temperature { get; set; }
+            public double WindSpeed { get; set; }
+            public int RelativeHumidity { get; set; }
+        }
+    }
